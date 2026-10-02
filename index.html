@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TikTok Profile Refresh</title>
+<style>
+  :root {
+    --backdrop: #000;
+    --pull: 0px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    background: var(--backdrop);
+    overflow: hidden;
+  }
+
+  .stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    max-width: 450px; /* Mobile app container view on desktop */
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #000;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .photo {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    object-fit: contain;
+    -webkit-user-drag: none;
+  }
+  .photo:not([src]) { display: none; }
+
+  /* 1. Header photo (stays fixed at top) */
+  .photo--header {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    flex-shrink: 0;
+  }
+
+  /* 3. Footer photo (stays fixed at bottom) */
+  .photo--footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    flex-shrink: 0;
+  }
+
+  /* 2. Body photo & 4. Loader container */
+  .pull {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    transform: translate3d(0, var(--pull), 0);
+    will-change: transform;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .stage.settling .pull {
+    transition: transform 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  /* Loader GIF attached to the top of the body photo, hidden behind the header */
+  .loader {
+    position: absolute;
+    left: 50%;
+    bottom: 100%;
+    transform: translateX(-50%);
+    visibility: hidden;
+    pointer-events: none;
+    width: 36px;
+    height: auto;
+  }
+  .stage.is-pulling .loader {
+    visibility: visible;
+  }
+
+  .photo--main {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    flex: 1;
+  }
+
+  #notice {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.85);
+    color: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    max-width: 85%;
+    z-index: 10;
+    font: 14px/1.5 system-ui, sans-serif;
+  }
+  #notice[hidden] { display: none; }
+</style>
+</head>
+<body>
+
+<main class="stage" id="stage">
+  <!-- First Photo: Header -->
+  <img class="photo photo--header" data-media="header" alt="Header">
+
+  <!-- Second Photo & Loader GIF -->
+  <div class="pull">
+    <img class="loader" data-media="loader" data-ext="gif webp png" alt="Loader">
+    <img class="photo photo--main" id="mainPhoto" data-media="body" alt="Main Photo">
+  </div>
+
+  <!-- Third Photo: Footer / Tabs -->
+  <img class="photo photo--footer" data-media="footer" alt="Footer">
+</main>
+
+<div id="notice" hidden></div>
+
+<script>
+(() => {
+  const PULL_RATIO = 0.15;   // pull down max 15% of body height
+  const HOLD_MS    = 800;    // loader stays out for 0.8 seconds before bouncing back
+  const SETTLE_MS  = 400;    // spring bounce-back duration
+
+  const stage = document.getElementById('stage');
+  const mainPhoto = document.getElementById('mainPhoto');
+  const notice = document.getElementById('notice');
+
+  // Automatically detect and load media files
+  function loadMedia(img) {
+    const name = img.dataset.media;
+    const exts = (img.dataset.ext || 'jpg jpeg png webp avif').split(' ');
+    return new Promise(resolve => {
+      let i = 0;
+      const next = () => {
+        if (i >= exts.length) { img.removeAttribute('src'); return resolve(false); }
+        img.src = name + '.' + exts[i++];
+      };
+      img.onload = () => resolve(true);
+      img.onerror = next;
+      next();
+    });
+  }
+
+  const media = [...stage.querySelectorAll('img[data-media]')];
+  Promise.all(media.map(loadMedia)).then(found => {
+    const missing = media.filter((_, i) => !found[i]).map(img => img.dataset.media);
+    if (missing.length) {
+      notice.textContent = 'Missing files: ' + missing.join(', ') +
+        '. Please place header.jpg, body.jpg, footer.jpg, and loader.gif in the same folder as index.html.';
+      notice.hidden = false;
+    }
+  });
+
+  let maxPull = 0, pull = 0;
+  let busy = false;
+  let armed = false;
+  let dragging = false;
+  let startY = 0;
+
+  function setPull(px) {
+    pull = px;
+    stage.style.setProperty('--pull', px + 'px');
+  }
+
+  function begin() {
+    maxPull = mainPhoto.offsetHeight * PULL_RATIO;
+    if (!(maxPull > 0)) maxPull = 70;
+    stage.classList.add('is-pulling');
+    return true;
+  }
+
+  function drag(raw) {
+    setPull(Math.min(maxPull, raw * 0.4));
+  }
+
+  function settle() {
+    busy = true;
+    stage.classList.add('settling');
+    setPull(0);
+    setTimeout(() => {
+      stage.classList.remove('settling', 'is-pulling');
+      busy = false;
+    }, SETTLE_MS);
+  }
+
+  function refresh() {
+    busy = true;
+    stage.classList.add('settling');
+    setPull(maxPull);
+    // Hold for 0.8s then automatically bounce back up
+    setTimeout(() => {
+      settle();
+    }, HOLD_MS);
+  }
+
+  function move(y) {
+    const dy = y - startY;
+    if (!dragging) {
+      if (dy <= 0) return;
+      begin();
+      dragging = true;
+    }
+    drag(dy);
+  }
+
+  function end() {
+    if (dragging) {
+      dragging = false;
+      armed = false;
+      if (pull > maxPull * 0.25) {
+        refresh();
+      } else {
+        settle();
+      }
+    }
+  }
+
+  // Touch events (Mobile)
+  stage.addEventListener('touchstart', e => {
+    if (busy || e.touches.length !== 1) return;
+    armed = true;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  stage.addEventListener('touchmove', e => {
+    if (!armed) return;
+    move(e.touches[0].clientY);
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  stage.addEventListener('touchend', end);
+  stage.addEventListener('touchcancel', end);
+
+  // Mouse events (Desktop testing)
+  stage.addEventListener('mousedown', e => {
+    if (e.button !== 0 || busy) return;
+    armed = true;
+    startY = e.clientY;
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!armed) return;
+    move(e.clientY);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (armed) {
+      armed = false;
+      end();
+    }
+  });
+
+  stage.addEventListener('dragstart', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>
