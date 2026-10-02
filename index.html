@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- iOS Home Screen App Icon -->
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>TikTok Profile Refresh</title>
 <style>
   :root {
     --backdrop: #000;
-    --settle: 400ms;
-    --snap: 200ms;
     --pull: 0px;
   }
 
@@ -23,42 +23,31 @@
     overflow: hidden;
   }
 
-  body {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font: 16px/1.5 system-ui, -apple-system, sans-serif;
-    color: #fff;
-  }
-
-  /* Stage fits screen width */
   .stage {
     position: relative;
     width: 100%;
-    max-width: 480px;
     height: 100%;
-    max-height: 100vh;
-    max-height: 100dvh;
+    max-width: 450px; /* Mobile app container view on desktop */
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
-    overflow-x: hidden;
-    overflow-y: auto;
-    background: var(--backdrop);
+    overflow: hidden;
+    background: #000;
     user-select: none;
     -webkit-user-select: none;
-    scrollbar-width: none;
   }
-  .stage::-webkit-scrollbar { display: none; }
 
   .photo {
     display: block;
     width: 100%;
     height: auto;
+    max-height: 100%;
+    object-fit: contain;
     -webkit-user-drag: none;
   }
   .photo:not([src]) { display: none; }
 
-  /* 1. Header photo stays fixed at the top */
+  /* 1. Header photo (stays fixed at top) */
   .photo--header {
     position: sticky;
     top: 0;
@@ -66,7 +55,7 @@
     flex-shrink: 0;
   }
 
-  /* 3. Footer photo stays fixed at the bottom */
+  /* 3. Footer photo (stays fixed at bottom) */
   .photo--footer {
     position: sticky;
     bottom: 0;
@@ -74,21 +63,22 @@
     flex-shrink: 0;
   }
 
-  /* 2. Body photo & Loader container */
+  /* 2. Body photo & 4. Loader container */
   .pull {
     position: relative;
     flex: 1;
-    overflow: visible;
+    overflow: hidden;
     transform: translate3d(0, var(--pull), 0);
     will-change: transform;
     display: flex;
     flex-direction: column;
   }
 
-  .stage.snapping .pull { transition: transform var(--snap) cubic-bezier(.22, 1, .36, 1); }
-  .stage.settling .pull { transition: transform var(--settle) cubic-bezier(.175, 0.885, 0.32, 1.275); }
+  .stage.settling .pull {
+    transition: transform 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
 
-  /* 4. Loader GIF glued to the top of body image, hidden behind header */
+  /* Loader GIF attached to the top of the body photo, hidden behind the header */
   .loader {
     position: absolute;
     left: 50%;
@@ -96,9 +86,8 @@
     transform: translateX(-50%);
     visibility: hidden;
     pointer-events: none;
-    height: 60px; /* Reliable fallback height so maxPull is always accurate */
-    width: auto;
-    object-fit: contain;
+    width: 36px;
+    height: auto;
   }
   .stage.is-pulling .loader {
     visibility: visible;
@@ -116,12 +105,14 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    max-width: 34ch;
-    padding: 24px;
-    text-align: center;
     background: rgba(0,0,0,0.85);
-    border-radius: 8px;
+    color: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    max-width: 85%;
     z-index: 10;
+    font: 14px/1.5 system-ui, sans-serif;
   }
   #notice[hidden] { display: none; }
 </style>
@@ -132,28 +123,29 @@
   <!-- First Photo: Header -->
   <img class="photo photo--header" data-media="header" alt="Header">
 
-  <!-- Body & Loader GIF -->
+  <!-- Second Photo & Loader GIF -->
   <div class="pull">
-    <img class="loader" data-media="loader" data-ext="gif webp png" alt="Loader" id="loaderImg">
-    <img class="photo photo--main" id="mainPhoto" data-media="body" alt="Main photo">
+    <img class="loader" data-media="loader" data-ext="gif webp png" alt="Loader">
+    <img class="photo photo--main" id="mainPhoto" data-media="body" alt="Main Photo">
   </div>
 
-  <!-- Third Photo: Footer -->
+  <!-- Third Photo: Footer / Tabs -->
   <img class="photo photo--footer" data-media="footer" alt="Footer">
 </main>
 
-<p id="notice" hidden></p>
+<div id="notice" hidden></div>
 
 <script>
 (() => {
-  const HOLD_MS   = 800;   // Loader stays visible for 0.8 seconds before bouncing back
-  const SETTLE_MS = 400;   // Spring bounce-back duration
-  const SNAP_MS   = 200;
+  const PULL_RATIO = 0.15;   // pull down max 15% of body height
+  const HOLD_MS    = 800;    // loader stays out for 0.8 seconds before bouncing back
+  const SETTLE_MS  = 400;    // spring bounce-back duration
 
   const stage = document.getElementById('stage');
-  const loaderImg = document.getElementById('loaderImg');
+  const mainPhoto = document.getElementById('mainPhoto');
   const notice = document.getElementById('notice');
 
+  // Automatically detect and load media files
   function loadMedia(img) {
     const name = img.dataset.media;
     const exts = (img.dataset.ext || 'jpg jpeg png webp avif').split(' ');
@@ -173,14 +165,13 @@
   Promise.all(media.map(loadMedia)).then(found => {
     const missing = media.filter((_, i) => !found[i]).map(img => img.dataset.media);
     if (missing.length) {
-      notice.textContent = 'Missing: ' + missing.join(', ') +
-        '. Put the photos in the same folder as index.html and name them ' +
-        'header, body, footer and loader (gif, jpg, png or webp).';
+      notice.textContent = 'Missing files: ' + missing.join(', ') +
+        '. Please place header.jpg, body.jpg, footer.jpg, and loader.gif in the same folder as index.html.';
       notice.hidden = false;
     }
   });
 
-  let maxPull = 60, pull = 0;
+  let maxPull = 0, pull = 0;
   let busy = false;
   let armed = false;
   let dragging = false;
@@ -192,74 +183,69 @@
   }
 
   function begin() {
-    // Set maxPull strictly to the height of the loader GIF
-    maxPull = loaderImg.offsetHeight || loaderImg.naturalHeight || 60;
+    maxPull = mainPhoto.offsetHeight * PULL_RATIO;
+    if (!(maxPull > 0)) maxPull = 70;
     stage.classList.add('is-pulling');
     return true;
   }
 
   function drag(raw) {
-    // 1:1 drag tracking capped precisely at maxPull so it won't pull past the loader
-    setPull(Math.min(maxPull, Math.max(0, raw)));
+    setPull(Math.min(maxPull, raw * 0.4));
   }
 
   function settle() {
     busy = true;
-    stage.classList.remove('snapping');
     stage.classList.add('settling');
     setPull(0);
     setTimeout(() => {
       stage.classList.remove('settling', 'is-pulling');
       busy = false;
-    }, SETTLE_MS + 40);
+    }, SETTLE_MS);
   }
 
   function refresh() {
     busy = true;
-    stage.classList.add('snapping');
+    stage.classList.add('settling');
     setPull(maxPull);
-    // Hold for exactly 0.8 seconds (800ms) showing the loader fully, then automatically bounce back
+    // Hold for 0.8s then automatically bounce back up
     setTimeout(() => {
       settle();
     }, HOLD_MS);
   }
 
-  function release() {
-    if (pull >= maxPull * 0.25) {
-      refresh();
-    } else {
-      settle();
-    }
-  }
-
-  function move(y, event) {
+  function move(y) {
     const dy = y - startY;
     if (!dragging) {
-      if (dy <= 0 || stage.scrollTop > 0) return;
-      if (!begin()) { armed = false; return; }
+      if (dy <= 0) return;
+      begin();
       dragging = true;
     }
-    if (event && event.cancelable) event.preventDefault();
     drag(dy);
   }
 
   function end() {
     if (dragging) {
       dragging = false;
-      release();
+      armed = false;
+      if (pull > maxPull * 0.25) {
+        refresh();
+      } else {
+        settle();
+      }
     }
-    armed = false;
   }
 
   // Touch events (Mobile)
   stage.addEventListener('touchstart', e => {
-    if (busy || e.touches.length !== 1 || stage.scrollTop > 0) return;
-    armed = true; dragging = false;
+    if (busy || e.touches.length !== 1) return;
+    armed = true;
     startY = e.touches[0].clientY;
   }, { passive: true });
 
   stage.addEventListener('touchmove', e => {
-    if (armed) move(e.touches[0].clientY, e);
+    if (!armed) return;
+    move(e.touches[0].clientY);
+    if (e.cancelable) e.preventDefault();
   }, { passive: false });
 
   stage.addEventListener('touchend', end);
@@ -267,17 +253,21 @@
 
   // Mouse events (Desktop testing)
   stage.addEventListener('mousedown', e => {
-    if (e.button !== 0 || busy || stage.scrollTop > 0) return;
-    armed = true; dragging = false;
+    if (e.button !== 0 || busy) return;
+    armed = true;
     startY = e.clientY;
   });
 
   window.addEventListener('mousemove', e => {
-    if (armed) move(e.clientY, e);
+    if (!armed) return;
+    move(e.clientY);
   });
 
   window.addEventListener('mouseup', () => {
-    if (armed) end();
+    if (armed) {
+      armed = false;
+      end();
+    }
   });
 
   stage.addEventListener('dragstart', e => e.preventDefault());
