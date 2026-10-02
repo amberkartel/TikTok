@@ -36,11 +36,14 @@
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     background: #000;
     user-select: none;
     -webkit-user-select: none;
+    scrollbar-width: none;
   }
+  .stage::-webkit-scrollbar { display: none; }
 
   .photo {
     display: block;
@@ -72,13 +75,16 @@
   .pull {
     position: relative;
     flex: 1;
-    overflow: hidden;
+    overflow: visible; /* FIXED: Allows loader GIF to show outside pull box */
     transform: translate3d(0, var(--pull), 0);
     will-change: transform;
     display: flex;
     flex-direction: column;
   }
 
+  .stage.snapping .pull {
+    transition: transform 200ms cubic-bezier(.22, 1, .36, 1);
+  }
   .stage.settling .pull {
     transition: transform 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
   }
@@ -91,8 +97,9 @@
     transform: translateX(-50%);
     visibility: hidden;
     pointer-events: none;
-    width: 36px;
-    height: auto;
+    height: 50px; /* Fallback height if natural height is pending */
+    width: auto;
+    object-fit: contain;
   }
   .stage.is-pulling .loader {
     visibility: visible;
@@ -130,7 +137,7 @@
 
   <!-- Second Photo & Loader GIF -->
   <div class="pull">
-    <img class="loader" data-media="loader" data-ext="gif webp png" alt="Loader">
+    <img class="loader" data-media="loader" data-ext="gif webp png" alt="Loader" id="loaderImg">
     <img class="photo photo--main" id="mainPhoto" data-media="body" alt="Main Photo">
   </div>
 
@@ -142,12 +149,11 @@
 
 <script>
 (() => {
-  const PULL_RATIO = 0.15;   // pull down max 15% of body height
   const HOLD_MS    = 800;    // loader stays out for 0.8 seconds before bouncing back
   const SETTLE_MS  = 400;    // spring bounce-back duration
 
   const stage = document.getElementById('stage');
-  const mainPhoto = document.getElementById('mainPhoto');
+  const loaderImg = document.getElementById('loaderImg');
   const notice = document.getElementById('notice');
 
   // Automatically detect and load media files
@@ -176,7 +182,7 @@
     }
   });
 
-  let maxPull = 0, pull = 0;
+  let maxPull = 50, pull = 0;
   let busy = false;
   let armed = false;
   let dragging = false;
@@ -188,18 +194,20 @@
   }
 
   function begin() {
-    maxPull = mainPhoto.offsetHeight * PULL_RATIO;
-    if (!(maxPull > 0)) maxPull = 70;
+    // Dynamically lock maxPull to the exact rendered height of the loader GIF
+    maxPull = loaderImg.offsetHeight || loaderImg.naturalHeight || 50;
     stage.classList.add('is-pulling');
     return true;
   }
 
   function drag(raw) {
-    setPull(Math.min(maxPull, raw * 0.4));
+    // 1:1 direct drag tracking capped strictly at the loader height
+    setPull(Math.min(maxPull, Math.max(0, raw)));
   }
 
   function settle() {
     busy = true;
+    stage.classList.remove('snapping');
     stage.classList.add('settling');
     setPull(0);
     setTimeout(() => {
@@ -210,47 +218,50 @@
 
   function refresh() {
     busy = true;
-    stage.classList.add('settling');
+    stage.classList.add('snapping');
     setPull(maxPull);
-    // Hold for 0.8s then automatically bounce back up
+    // Hold for exactly 0.8 seconds (800ms) showing the loader fully, then automatically bounce back up
     setTimeout(() => {
       settle();
     }, HOLD_MS);
   }
 
-  function move(y) {
+  function release() {
+    if (pull >= maxPull * 0.3) {
+      refresh();
+    } else {
+      settle();
+    }
+  }
+
+  function move(y, event) {
     const dy = y - startY;
     if (!dragging) {
-      if (dy <= 0) return;
-      begin();
+      if (dy <= 0 || stage.scrollTop > 0) return;
+      if (!begin()) { armed = false; return; }
       dragging = true;
     }
+    if (event && event.cancelable) event.preventDefault();
     drag(dy);
   }
 
   function end() {
     if (dragging) {
       dragging = false;
-      armed = false;
-      if (pull > maxPull * 0.25) {
-        refresh();
-      } else {
-        settle();
-      }
+      release();
     }
+    armed = false;
   }
 
   // Touch events (Mobile)
   stage.addEventListener('touchstart', e => {
-    if (busy || e.touches.length !== 1) return;
-    armed = true;
+    if (busy || e.touches.length !== 1 || stage.scrollTop > 0) return;
+    armed = true; dragging = false;
     startY = e.touches[0].clientY;
   }, { passive: true });
 
   stage.addEventListener('touchmove', e => {
-    if (!armed) return;
-    move(e.touches[0].clientY);
-    if (e.cancelable) e.preventDefault();
+    if (armed) move(e.touches[0].clientY, e);
   }, { passive: false });
 
   stage.addEventListener('touchend', end);
@@ -258,21 +269,17 @@
 
   // Mouse events (Desktop testing)
   stage.addEventListener('mousedown', e => {
-    if (e.button !== 0 || busy) return;
-    armed = true;
+    if (e.button !== 0 || busy || stage.scrollTop > 0) return;
+    armed = true; dragging = false;
     startY = e.clientY;
   });
 
   window.addEventListener('mousemove', e => {
-    if (!armed) return;
-    move(e.clientY);
+    if (armed) move(e.clientY, e);
   });
 
   window.addEventListener('mouseup', () => {
-    if (armed) {
-      armed = false;
-      end();
-    }
+    if (armed) end();
   });
 
   stage.addEventListener('dragstart', e => e.preventDefault());
